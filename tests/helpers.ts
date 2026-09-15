@@ -5,11 +5,16 @@ import {
   type BrowserReceipt,
 } from '../src/adapters/chatgpt/browser-adapter.js';
 import { Orchestrator } from '../src/core/orchestrator.js';
-import { projectFromConfig } from '../src/config/project.js';
+import {
+  projectFromConfig,
+  repositoryFromConfig,
+  workstreamFromConfig,
+} from '../src/config/project.js';
 import {
   BridgeError,
   now,
-  type Project,
+  type CodexContext,
+  type ProjectRepository,
   type Run,
   type CodexAdapter,
   type CodexHooks,
@@ -19,6 +24,7 @@ import {
 } from '../src/core/types.js';
 export class FakeCodex implements CodexAdapter {
   calls: string[] = [];
+  contexts: CodexContext[] = [];
   auth = 'chatgpt';
   failure?: string;
   approval = false;
@@ -42,10 +48,14 @@ export class FakeCodex implements CodexAdapter {
   async account() {
     return { type: this.auth };
   }
-  async ensureThread(p: Project) {
-    return p.codex_thread_id ?? this.thread;
+  async ensureThread(p: CodexContext) {
+    return (
+      p.codex_thread_id ??
+      (p.workstream_id === 'main-work' ? this.thread : 'thread-' + p.workstream_id)
+    );
   }
-  async execute(_p: Project, instruction: string, _id: string, h: CodexHooks) {
+  async execute(_p: CodexContext, instruction: string, _id: string, h: CodexHooks) {
+    this.contexts.push({ ..._p });
     this.calls.push(instruction);
     h.onStarted('remote-turn');
     h.onEvent('item/completed', { item: this.result.items[0] });
@@ -69,9 +79,11 @@ export class FakeGit implements GitAdapter {
     await this.verify();
     return 'abc123';
   }
-  async evidence() {
+  async evidence(p: ProjectRepository) {
     await this.verify();
     return {
+      repository_id: p.repository_id,
+      logical_name: p.logical_name,
       head: 'def456',
       baseline_head: 'abc123',
       branch: 'bridge/test',
@@ -80,33 +92,56 @@ export class FakeGit implements GitAdapter {
       diff_stat: '1 file changed',
       diff: '+ fixed',
       untracked_files: [],
+      untracked_content: [],
+      issues: [],
     };
   }
 }
-export function fixture(path = ':memory:') {
+export function fixture(path = ':memory:', repoPath = process.cwd()) {
   const store = new SQLiteStore(path);
   const p = projectFromConfig({
     project_id: 'daily-line',
     project_name: 'The Daily Line',
     chatgpt_thread_url: 'https://chatgpt.com/c/existing-thread',
     chatgpt_thread_title: 'Architecture',
-    repo_url: 'https://github.com/example/daily-line.git',
-    repo_path: process.cwd(),
-    working_branch: 'bridge/test',
   });
   store.saveProject(p);
+  const repo = repositoryFromConfig(p.project_id, {
+    repository_id: 'daily-repo',
+    logical_name: 'Daily test repository',
+    repo_url: 'https://github.com/example/daily-line.git',
+    repo_path: repoPath,
+    default_branch: 'main',
+    working_branch: 'bridge/test',
+    role: 'test',
+  });
+  const workstream = workstreamFromConfig(p.project_id, {
+    workstream_id: 'main-work',
+    repository_id: repo.repository_id,
+  });
+  store.addRepository(repo);
+  store.addWorkstream(workstream);
   const browser = new BrowserChatGPTAdapter(store),
     codex = new FakeCodex(),
     git = new FakeGit(),
     engine = new Orchestrator(store, browser, codex, git);
-  return { store, p, browser, codex, git, engine };
+  const context = (): CodexContext => ({
+    ...repo,
+    ...store.workstream(p.project_id, workstream.workstream_id),
+    timeout_ms: p.timeout_ms,
+    approval_policy: p.approval_policy,
+  });
+  return { store, p, repo, workstream, context, browser, codex, git, engine };
 }
 export function response(
   id: string,
   status: DecisionStatus = 'CONTINUE_CODEX',
   instruction = 'Fix the local test.\nPreserve the established architecture.',
+  repositoryId = 'daily-repo',
+  workstreamId = 'main-work',
 ) {
-  return `Review complete.\nBRIDGE_REQUEST_ID: ${id}\nBRIDGE_STATUS: ${status}\nBRIDGE_CODEX_INSTRUCTION: ${['CONTINUE_CODEX', 'RETRY_CODEX'].includes(status) ? instruction : 'NONE'}\nBRIDGE_USER_ACTION: ${status === 'USER_DECISION_REQUIRED' ? 'Choose A or B.' : 'NONE'}\nBRIDGE_NOTES: Reviewed.`;
+  const continuing = ['CONTINUE_CODEX', 'RETRY_CODEX'].includes(status);
+  return `Review complete.\nBRIDGE_REQUEST_ID: ${id}\nBRIDGE_STATUS: ${status}\nBRIDGE_TARGET_REPOS: ${JSON.stringify(continuing ? [repositoryId] : [])}\nBRIDGE_WORKSTREAM: ${continuing ? workstreamId : 'NONE'}\nBRIDGE_CODEX_INSTRUCTION: ${continuing ? instruction : 'NONE'}\nBRIDGE_USER_ACTION: ${status === 'USER_DECISION_REQUIRED' ? 'Choose A or B.' : 'NONE'}\nBRIDGE_NOTES: Reviewed.`;
 }
 export function receipt(
   f: ReturnType<typeof fixture>,

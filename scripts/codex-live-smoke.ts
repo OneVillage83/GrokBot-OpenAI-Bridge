@@ -2,19 +2,24 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AppServerCodexAdapter } from '../src/adapters/codex/app-server-adapter.js';
-import { projectFromConfig } from '../src/config/project.js';
+import type { CodexContext } from '../src/core/types.js';
 const dir = resolve('.local/codex-live-smoke');
 mkdirSync(dir, { recursive: true });
-const p = projectFromConfig({
+const p: CodexContext = {
   project_id: 'adapter-smoke',
-  project_name: 'Adapter smoke (no project architecture)',
-  chatgpt_thread_url: 'https://chatgpt.com/c/not-used',
-  chatgpt_thread_title: 'not-used',
+  repository_id: 'smoke',
+  logical_name: 'smoke',
+  default_branch: 'main',
+  role: 'test',
+  enabled: true,
+  workstream_id: 'smoke',
+  codex_thread_id: null,
+  approval_policy: 'human',
   repo_url: 'https://example.invalid/not-used.git',
   repo_path: dir,
   working_branch: 'bridge/smoke',
   timeout_ms: 120000,
-});
+};
 const adapter = new AppServerCodexAdapter();
 const events: unknown[] = [];
 try {

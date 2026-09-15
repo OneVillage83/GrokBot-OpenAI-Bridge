@@ -15,7 +15,10 @@ test('successful controlled loop preserves raw instruction, evidence, decisions 
     assert.equal(r.state, 'READY_FOR_NEXT_CODEX_TURN');
     r = await f.engine.drive(f.p, r);
     assert.deepEqual(f.codex.calls, [exact]);
-    assert.equal(f.store.project(f.p.project_id).codex_thread_id, 'durable-thread');
+    assert.equal(
+      f.store.workstream(f.p.project_id, f.workstream.workstream_id).codex_thread_id,
+      'durable-thread',
+    );
     assert.equal(r.state, 'WAITING_FOR_CHATGPT');
     const message = f.store.chat(r.pending_chatgpt_id!).message;
     assert.match(message, /npm test/);

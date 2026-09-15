@@ -29,16 +29,14 @@ export interface Decision {
   user_action: string;
   notes: string;
   request_id: string;
+  target_repos: string[];
+  workstream_id: string | null;
 }
 export interface Project {
   project_id: string;
   project_name: string;
   chatgpt_thread_url: string;
   chatgpt_thread_title: string;
-  repo_url: string;
-  repo_path: string;
-  working_branch: string;
-  codex_thread_id: string | null;
   current_phase: string;
   current_task: string;
   last_completed_task: string;
@@ -50,6 +48,37 @@ export interface Project {
   autonomy_enabled: boolean;
   created_at: string;
   updated_at: string;
+}
+export interface ProjectRepository {
+  repository_id: string;
+  project_id: string;
+  logical_name: string;
+  repo_url: string;
+  repo_path: string;
+  default_branch: string;
+  working_branch: string;
+  role: string;
+  enabled: boolean;
+}
+export interface CodexWorkstream {
+  workstream_id: string;
+  project_id: string;
+  repository_id: string;
+  codex_thread_id: string | null;
+  current_task: string;
+  status: State;
+}
+/** Exactly one explicitly routed repository is writable in this release. */
+export type CodexContext = ProjectRepository & {
+  workstream_id: string;
+  codex_thread_id: string | null;
+  timeout_ms: number;
+  approval_policy: Project['approval_policy'];
+};
+export interface ProjectRegistration {
+  project: Project;
+  repositories: ProjectRepository[];
+  workstreams: CodexWorkstream[];
 }
 export interface Run {
   id: string;
@@ -64,7 +93,11 @@ export interface Run {
   pending_instruction: string | null;
   pending_chatgpt_id: string | null;
   pending_codex_id: string | null;
-  baseline_head: string;
+  repository_baselines: Record<string, string>;
+  authorized_repository_ids: string[];
+  pending_repository_ids: string[];
+  pending_workstream_id: string | null;
+  migration_review_required?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -90,6 +123,8 @@ export interface CodexTurn {
   instruction: string;
   instruction_sha256: string;
   thread_id: string;
+  repository_id: string;
+  workstream_id: string;
   remote_turn_id: string | null;
   status: 'intent' | 'running' | 'completed' | 'failed' | 'interrupted';
   result?: CodexResult;
@@ -102,6 +137,8 @@ export interface CodexResult {
   error?: unknown;
 }
 export interface GitEvidence {
+  repository_id: string;
+  logical_name: string;
   head: string;
   baseline_head: string;
   branch: string;
@@ -110,18 +147,34 @@ export interface GitEvidence {
   diff_stat: string;
   diff: string;
   untracked_files: string[];
+  untracked_content: FileEvidence[];
+  issues: string[];
   [key: string]: unknown;
 }
+export interface FileEvidence {
+  path: string;
+  kind: 'text' | 'binary' | 'unsafe' | 'unavailable';
+  bytes?: number;
+  sha256?: string;
+  snapshot_path?: string;
+  content?: string;
+  omitted_reason?: string;
+}
 export interface GitAdapter {
-  prepare(p: Project): Promise<string>;
-  verify(p: Project, clean?: boolean): Promise<void>;
-  evidence(p: Project, baseline: string): Promise<GitEvidence>;
+  prepare(p: ProjectRepository): Promise<string>;
+  verify(p: ProjectRepository, clean?: boolean): Promise<void>;
+  evidence(p: ProjectRepository, baseline: string, archiveDirectory: string): Promise<GitEvidence>;
 }
 export interface CodexAdapter {
   connect(): Promise<void>;
   account(): Promise<{ type: string | null }>;
-  ensureThread(p: Project): Promise<string>;
-  execute(p: Project, instruction: string, turnId: string, hooks: CodexHooks): Promise<CodexResult>;
+  ensureThread(p: CodexContext): Promise<string>;
+  execute(
+    p: CodexContext,
+    instruction: string,
+    turnId: string,
+    hooks: CodexHooks,
+  ): Promise<CodexResult>;
   readThread(threadId: string): Promise<any>;
   close(): Promise<void>;
 }

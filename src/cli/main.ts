@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
-import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync, cpSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -13,19 +13,28 @@ import { codexCommand, codexEnv } from '../adapters/codex/process.js';
 import { Orchestrator } from '../core/orchestrator.js';
 import { BridgeError, now, type Run } from '../core/types.js';
 import { verifyThread, hash } from '../core/protocol.js';
-import { projectFromConfig } from '../config/project.js';
+import {
+  registrationFromConfig,
+  repositoryFromConfig,
+  workstreamFromConfig,
+  pathsOverlap,
+} from '../config/project.js';
 import { redact } from '../logging/redact.js';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const help = `GrokBot OpenAI Bridge — browser courier + Codex App Server
 
 bridge init
+bridge migrate
 bridge project add --file daily-line.json
 bridge project list | show <project>
 bridge project enable-autonomy <project> --acknowledge
-bridge repo prepare <project> [--clone]
+bridge repo add | update <project> --file REPOSITORY.json
+bridge workstream add <project> --file WORKSTREAM.json
+bridge repo list <project> | workstream list <project>
+bridge repo prepare <project> --repository REPOSITORY_ID [--clone]
 bridge auth codex [--device-auth]
 bridge verify-chatgpt <project> --observed-url URL --title TITLE
-bridge start <project> [--task "Continue DL-Agent-1"]
+bridge start <project> [--repositories ID1,ID2] [--task "Continue DL-Agent-1"]
 bridge outbox <project> [--output DIRECTORY]
 bridge browser claim <project> --observed-url URL --title TITLE --baseline ASSISTANT_ID
 bridge browser sent <project> --observed-url URL --title TITLE --message-id USER_MESSAGE_ID
@@ -57,6 +66,8 @@ for (const k of [
   'reason',
   'run',
   'data-dir',
+  'repository',
+  'repositories',
 ])
   opt[k] = { type: 'string' };
 for (const k of ['help', 'clone', 'device-auth', 'acknowledge']) opt[k] = { type: 'boolean' };
@@ -106,10 +117,18 @@ async function main() {
     if (result !== 0) throw new BridgeError('CODEX_LOGIN_FAILED');
     return;
   }
-  const store = new SQLiteStore(join(data, 'bridge.sqlite'));
+  const store = new SQLiteStore(join(data, 'bridge.sqlite'), { migrate: a[0] === 'migrate' });
   let release: (() => unknown) | undefined;
   let codex: AppServerCodexAdapter | undefined;
   try {
+    if (a[0] === 'migrate') {
+      out({
+        schema_version: 2,
+        backup: store.migrationBackup ?? null,
+        note: 'Migrated active runs require human reconciliation and cancellation. Review primary repository default_branch and keep autonomy disabled.',
+      });
+      return;
+    }
     if (a[0] === 'init') {
       const dest = join(data, 'daily-line.example.json');
       if (!existsSync(dest))
@@ -126,19 +145,9 @@ async function main() {
       return;
     }
     if (a[0] === 'project' && a[1] === 'add') {
-      const p = projectFromConfig(readJSON(required('file')));
-      if (store.projects().some((x) => x.project_id === p.project_id))
-        throw new BridgeError(
-          'PROJECT_EXISTS',
-          'Existing project identity cannot be silently overwritten.',
-        );
-      if (store.projects().some((x) => resolve(x.repo_path) === resolve(p.repo_path)))
-        throw new BridgeError(
-          'REPOSITORY_ALREADY_REGISTERED',
-          'Use a separate checkout for another project.',
-        );
-      store.saveProject(p);
-      out(p);
+      const registration = registrationFromConfig(readJSON(required('file')));
+      store.register(registration);
+      out(registration);
       return;
     }
     if (a[0] === 'logs') {
@@ -151,7 +160,19 @@ async function main() {
       const rows = store.artifacts(id);
       if (v.output) {
         const dest = resolve(required('output'));
+        if (pathsOverlap(dest, store.rawRoot))
+          throw new BridgeError(
+            'INVALID_EXPORT_DIRECTORY',
+            'Export outside the private raw snapshot directory.',
+          );
         for (const row of rows) atomic(join(dest, `${row.id}.txt`), row.raw as string);
+        const rawDirectory = join(store.rawRoot, id);
+        if (existsSync(rawDirectory))
+          cpSync(rawDirectory, join(dest, 'raw-snapshots'), {
+            recursive: true,
+            errorOnExist: true,
+            force: false,
+          });
         atomic(
           join(dest, 'index.json'),
           JSON.stringify(
@@ -168,7 +189,7 @@ async function main() {
       } else out(rows.map(({ raw, ...r }) => ({ ...r, bytes: Buffer.byteLength(raw as string) })));
       return;
     }
-    const id = ['project', 'repo', 'browser'].includes(a[0]) ? a[2] : a[1];
+    const id = ['project', 'repo', 'workstream', 'browser'].includes(a[0]) ? a[2] : a[1];
     if (a[0] === 'doctor') {
       const checks: Array<{ check: string; ok: boolean; detail: unknown }> = [];
       const check = async (name: string, f: () => unknown | Promise<unknown>) => {
@@ -203,10 +224,11 @@ async function main() {
           detail: 'No project configured. Add exact conversation and repository first.',
         });
       for (const p of projects) {
-        await check(`${p.project_id}:repo`, async () => {
-          await new LocalGitAdapter().verify(p, true);
-          return { path: p.repo_path, branch: p.working_branch, clean: true };
-        });
+        for (const repo of store.repositories(p.project_id).filter((x) => x.enabled))
+          await check(`${p.project_id}:${repo.repository_id}`, async () => {
+            await new LocalGitAdapter().verify(repo, true);
+            return { path: repo.repo_path, branch: repo.working_branch, clean: true };
+          });
         await check(`${p.project_id}:chatgpt-url`, () => {
           verifyThread(p, p.chatgpt_thread_url, p.chatgpt_thread_title);
           return p.chatgpt_thread_url;
@@ -225,7 +247,7 @@ async function main() {
     if (!id) throw new BridgeError('PROJECT_ID_REQUIRED');
     const p = store.project(id);
     if (a[0] === 'project' && a[1] === 'show') {
-      out(p);
+      out({ project: p, repositories: store.repositories(id), workstreams: store.workstreams(id) });
       return;
     }
     if (a[0] === 'status') {
@@ -233,6 +255,8 @@ async function main() {
       const t = r?.pending_chatgpt_id ? store.chat(r.pending_chatgpt_id) : undefined;
       out({
         project: p,
+        repositories: store.repositories(id),
+        workstreams: store.workstreams(id),
         run: r,
         browser_timeout_detected:
           !!t?.claimed_at &&
@@ -261,6 +285,39 @@ async function main() {
       return;
     }
     release = store.lock(id);
+    if (a[0] === 'repo' && a[1] === 'list') {
+      out(store.repositories(id));
+      return;
+    }
+    if (a[0] === 'workstream' && a[1] === 'list') {
+      out(store.workstreams(id));
+      return;
+    }
+    if (a[0] === 'repo' && ['add', 'update'].includes(a[1])) {
+      const repo = repositoryFromConfig(id, readJSON(required('file')));
+      store.tx(() => {
+        if (a[1] === 'add') store.addRepository(repo);
+        else store.updateRepository(repo);
+        store.event(null, 'registry', 'repository-' + a[1], {
+          project_id: id,
+          repository_id: repo.repository_id,
+        });
+      });
+      out(repo);
+      return;
+    }
+    if (a[0] === 'workstream' && a[1] === 'add') {
+      const workstream = workstreamFromConfig(id, readJSON(required('file')));
+      store.tx(() => {
+        store.addWorkstream(workstream);
+        store.event(null, 'registry', 'workstream-added', {
+          project_id: id,
+          workstream_id: workstream.workstream_id,
+        });
+      });
+      out(workstream);
+      return;
+    }
     const browser = new BrowserChatGPTAdapter(store);
     if (a[0] === 'verify-chatgpt') {
       verifyThread(p, required('observed-url'), required('title'));
@@ -288,8 +345,10 @@ async function main() {
       const active = store.latest(id);
       if (active && !['COMPLETED', 'FAILED'].includes(active.state))
         throw new BridgeError('ACTIVE_RUN_EXISTS');
-      await new LocalGitAdapter().setup(p, !!v.clone);
-      out({ repo: p.repo_path, branch: p.working_branch });
+      const repo = store.repository(id, required('repository'));
+      if (!repo.enabled) throw new BridgeError('REPOSITORY_DISABLED');
+      await new LocalGitAdapter().setup(repo, !!v.clone);
+      out({ repository_id: repo.repository_id, repo: repo.repo_path, branch: repo.working_branch });
       return;
     }
     if (a[0] === 'outbox') {
@@ -345,7 +404,11 @@ async function main() {
     const engine = new Orchestrator(store, browser, codex, new LocalGitAdapter());
     let r: Run;
     if (a[0] === 'start')
-      r = await engine.start(p, typeof v.task === 'string' ? v.task : 'Continue DL-Agent-1.');
+      r = await engine.start(
+        p,
+        typeof v.task === 'string' ? v.task : 'Continue DL-Agent-1.',
+        typeof v.repositories === 'string' ? v.repositories.split(',') : undefined,
+      );
     else if (a[0] === 'browser' && a[1] === 'receive')
       r = await engine.receive(p, latest(), readJSON(required('file')));
     else if (a[0] === 'continue') r = await engine.drive(p, latest());

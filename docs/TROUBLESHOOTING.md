@@ -24,7 +24,14 @@
 | `DIRTY_WORKING_TREE` | Commit/stash existing work manually before starting a new run |
 | `GIT_CONFLICT`, `GIT_OPERATION_IN_PROGRESS` | Human reconciles the in-progress Git operation; never auto-resolve architecture conflicts |
 | Tests/build fail | Review the exact exit code and output in ChatGPT; failure is evidence, not completion |
-| `EVIDENCE_TOO_LARGE` | Export full artifacts and arrange human-reviewed transport; no silent truncation |
+| `EVIDENCE_TOO_LARGE`, `EVIDENCE_REQUIRES_HUMAN_REVIEW` | Export full artifacts and arrange human-reviewed transport; no silent truncation |
+| `UNAUTHORIZED_REPOSITORY`, `REPOSITORY_DISABLED` | Inspect user-registered catalog and run scope; never add/enable a repo to satisfy a model request |
+| `UNKNOWN_WORKSTREAM`, `WRONG_WORKSTREAM` | Ask ChatGPT for the correct registered route after human resolves the stop; never invent IDs |
+| `MULTI_REPO_TURN_UNSUPPORTED` | One repository per turn; request a bounded routed instruction, never auto-split |
+| `WORKSTREAM_IDENTITY_CHANGE`, `WRONG_CODEX_THREAD` | Restore original workstream/thread context; do not replace it |
+| `STATE_MIGRATION_REQUIRED`, `MIGRATION_REVIEW_REQUIRED` | Follow the backed-up schema-2 migration in Operations; reconcile old external work before cancellation/new run |
+| `REPOSITORY_REVIEW_REQUIRED` | Supply migrated repository default_branch through `repo update` while idle |
+| `REPOSITORY_PATH_OVERLAP`, `STATE_REPOSITORY_OVERLAP` | Use separate canonical checkouts with private state outside all repositories |
 | `DUPLICATE_RUN`, `PROJECT_BUSY` | Inspect existing run/controller; pause or recover instead of launching another |
 | `LOOP_LIMIT`, `CONTROLLED_TEST_COMPLETE` | Show summary; obtain explicit human continuation authorization |
 | Node SQLite experimental warning | Expected on tested Node 24.11.1; the test suite exercises the actual SQLite implementation |

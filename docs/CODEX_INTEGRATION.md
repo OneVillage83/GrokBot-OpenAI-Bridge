@@ -13,7 +13,7 @@ The project pins `@openai/codex` **0.154.0** and prefers its local executable. W
 | `initialize`, `initialized` | One handshake per connection |
 | `config/read` | Discover configured MCP servers, disable them for bridge threads |
 | `account/read` | Require `account.type === chatgpt`; reject missing/API-key accounts |
-| `thread/start`, `thread/resume` | Persist and reuse the project thread ID; verify working directory |
+| `thread/start`, `thread/resume` | Persist and reuse the selected workstream thread ID; verify working directory |
 | `thread/read` | Read completed original turns for restart recovery; never silently fork |
 | `turn/start` | Exact instruction, client message UUID, explicit cwd and sandbox |
 | `item/*`, `turn/*`, errors | Persist raw notifications and correlate completion to the active thread/turn |
@@ -24,9 +24,11 @@ Completion may arrive before the RPC acknowledgement. The client buffers and cor
 
 `bridge auth codex` invokes the pinned client's official login flow. `--device-auth` uses its device flow. The adapter strips API-key/token environment variables and checks account mode. It forces the `openai` provider, disables web search/app tools and explicitly disables discovered MCP servers for bridge threads. Normal host Codex configuration and credentials remain a trust boundary; see SECURITY.md.
 
+Every turn uses the selected registered repository as cwd and its only writable repository root. Network access and temporary write exemptions are disabled. A workstream is tied to that repository; its existing thread cwd must match before resume. Completed file-change items/patches accompany per-repository Git evidence in the ChatGPT review.
+
 The child lives for the duration of the CLI action. Durable server threads outlive that process. A future daemon can retain the same adapter instance for multiple turns without changing the orchestrator interface.
 
-## Validation
+## Optional live validation (not run in v0.2 hardening or CI)
 
 ```sh
 npm run smoke:codex

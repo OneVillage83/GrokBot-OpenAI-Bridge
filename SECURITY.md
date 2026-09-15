@@ -10,7 +10,7 @@ The bridge never merges, force pushes, deletes repositories/unmerged branches, d
 
 ## Limits of enforcement
 
-The App Server is configured with workspace-write, network disabled, untrusted command approvals and the user approval reviewer. Discovered MCP servers, app tools and web search are disabled for bridge threads. These settings reduce access; they do not mathematically prove that arbitrary repository code or a model will behave safely. The host's Codex installation, configuration, skills/hooks, OS sandbox and existing credentials remain trusted. Test scripts can have side effects. Post-turn Git checks cannot undo a side effect that already occurred.
+A run fixes its allowed repository IDs; ChatGPT must select one registered enabled repository and its workstream per turn. Unknown/mismatched/multiple targets fail closed. GrokBot cannot add repositories or broaden access from model output. Canonical checkout roots may not overlap each other or private state. The App Server is configured with workspace-write scoped to that selected root, temporary write exemptions disabled, network disabled, untrusted command approvals and the user approval reviewer. Discovered MCP servers, app tools and web search are disabled for bridge threads. These settings reduce access; they do not mathematically prove that arbitrary repository code or a model will behave safely. The host's Codex installation, configuration, skills/hooks, OS sandbox and existing credentials remain trusted. Test scripts can have side effects. Post-turn Git checks cannot undo a side effect that already occurred.
 
 Use GrokBot's dedicated computer/account with no production credentials or unrelated repositories mounted. Production deployment requires stronger isolation, validation of effective tool configuration, a reviewed approval interface and adversarial security testing. Do not describe prompt instructions as an OS security boundary. The global executable is not modified; a locally pinned official client is used by default.
 
@@ -23,6 +23,7 @@ The browser receipt is an attestation by GrokBot/the human. URL/title/nonce/iden
 - Never put credentials in repo URLs, examples, source files or decision files. Use the host's normal Git credential mechanisms.
 - Structured event logs redact common token formats and secret-named fields. They omit raw protocol payloads.
 - Private artifacts intentionally preserve raw ChatGPT/Codex/test/Git material for provenance. A source file or command may accidentally contain a secret; **raw artifacts are not redacted** because redaction would alter evidence. Avoid generating secret output, restrict storage permissions and inspect exports before sharing.
+- New-file and Git snapshots, schema backups and artifact exports are also raw private evidence; binary snapshots may contain sensitive bytes even when only metadata goes to ChatGPT. Oversized evidence stops for human review with full local captures where capture succeeds. Ignored files are not collected, and filesystem/capture failures must not be presented as complete evidence.
 - SQLite is not encrypted. The user must protect the state directory using OS permissions/encryption/backups. Windows modes do not replace ACL configuration.
 
 ## Concurrency and recovery

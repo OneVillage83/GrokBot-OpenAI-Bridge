@@ -12,17 +12,24 @@ test('stdio adapter performs handshake, correlates RPC and handles completion be
   try {
     await a.connect();
     assert.deepEqual(await a.account(), { type: 'chatgpt' });
-    f.p.codex_thread_id = 'thread';
+    const context = f.context();
+    context.codex_thread_id = 'thread';
     let id = '';
-    const result = await a.execute(f.p, 'instruction', 'local-id', {
+    let submitted: any;
+    const result = await a.execute(context, 'instruction', 'local-id', {
       onStarted: (x) => (id = x),
-      onEvent: () => {},
+      onEvent: (method, params) => {
+        if (method === 'bridge/test-request') submitted = params;
+      },
       onApproval: () => false,
       shouldPause: () => false,
     });
     assert.equal(id, 'turn');
     assert.equal(result.status, 'completed');
     assert.equal(result.final_response, 'Streamed final');
+    assert.equal(submitted.cwd, context.repo_path);
+    assert.deepEqual(submitted.sandboxPolicy.writableRoots, [context.repo_path]);
+    assert.equal(submitted.sandboxPolicy.networkAccess, false);
     await assert.rejects(() => a.request('invalid', {}), /Unknown method/);
   } finally {
     await a.close();

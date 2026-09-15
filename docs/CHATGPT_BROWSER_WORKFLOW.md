@@ -53,6 +53,8 @@ bridge browser receive daily-line --file receipt.json
 bridge status daily-line
 ```
 
+The response must use the [v2 routed footer](BRIDGE_PROTOCOL.md): exact registered repository/workstream IDs for continuation, or `[]` and `NONE` for a stop. GrokBot must never repair routing or add repositories to make a response pass.
+
 9. If ready, `bridge continue daily-line` relays the instruction. If waiting, paused, failed or complete, follow that stop. Receiving a response never automatically starts code execution.
 
 ## Crash or uncertain send

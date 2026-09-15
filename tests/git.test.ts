@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LocalGitAdapter } from '../src/adapters/git/git-adapter.js';
-import { projectFromConfig } from '../src/config/project.js';
+import { repositoryFromConfig } from '../src/config/project.js';
 test('real Git checks branch/origin/dirty state and collects committed, unstaged and untracked evidence', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'bridge-git-'));
   const git = new LocalGitAdapter();
@@ -21,8 +21,11 @@ test('real Git checks branch/origin/dirty state and collects committed, unstaged
     '-m',
     'baseline',
   ]);
-  const p = projectFromConfig({
-    project_id: 'git-test',
+  const p = repositoryFromConfig('git-test', {
+    repository_id: 'git-test',
+    logical_name: 'Git test',
+    default_branch: 'main',
+    role: 'test',
     project_name: 'Git test',
     chatgpt_thread_url: 'https://chatgpt.com/c/test',
     chatgpt_thread_title: 'Test',
@@ -46,7 +49,11 @@ test('real Git checks branch/origin/dirty state and collects committed, unstaged
   ]);
   writeFileSync(join(dir, 'file.txt'), 'unstaged final\n');
   writeFileSync(join(dir, 'new.txt'), 'untracked\n');
-  const evidence = await git.evidence(p, baseline);
+  const evidence = await git.evidence(
+    p,
+    baseline,
+    mkdtempSync(join(tmpdir(), 'bridge-git-artifacts-')),
+  );
   assert.notEqual(evidence.head, baseline);
   assert.match(evidence.diff, /unstaged final/);
   assert.match(evidence.files_changed, /file.txt/);

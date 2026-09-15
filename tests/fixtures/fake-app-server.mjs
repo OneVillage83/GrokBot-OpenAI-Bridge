@@ -9,6 +9,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   else if (m.method === 'account/read')
     send({ id: m.id, result: { account: { type: 'chatgpt' } } });
   else if (m.method === 'turn/start') {
+    send({ method: 'bridge/test-request', params: m.params });
     send({
       method: 'item/completed',
       params: {

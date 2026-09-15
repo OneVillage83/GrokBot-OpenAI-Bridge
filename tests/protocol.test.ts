@@ -89,7 +89,7 @@ test('policy never accepts command, network or unknown requests', () => {
       'item/permissions/requestApproval',
       'unknown',
     ])
-      assert.equal(mayApprove(f.p, m, {}, new Map()), false);
+      assert.equal(mayApprove(f.context(), m, {}, new Map()), false);
   } finally {
     f.store.close();
   }
@@ -111,7 +111,7 @@ test('local edit approval rejects deletion, moves, dotgit and outside paths', ()
     const items = new Map<string, any>();
     const approve = (path: string, kind: any) => {
       items.set('i', { type: 'fileChange', changes: [{ path, kind }] });
-      return mayApprove(f.p, 'item/fileChange/requestApproval', { itemId: 'i' }, items);
+      return mayApprove(f.context(), 'item/fileChange/requestApproval', { itemId: 'i' }, items);
     };
     assert.equal(approve(resolve('new-local-file.txt'), { type: 'add' }), true);
     assert.equal(approve(resolve('new-local-file.txt'), { type: 'delete' }), false);

@@ -2,7 +2,14 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { realpathSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { BridgeError, type Project, type GitAdapter, type GitEvidence } from '../../core/types.js';
+import {
+  BridgeError,
+  type ProjectRepository,
+  type GitAdapter,
+  type GitEvidence,
+} from '../../core/types.js';
+import { EVIDENCE_LIMITS, snapshotUntracked } from './file-evidence.js';
+import { captureGit } from './git-capture.js';
 const exec = promisify(execFile);
 export class LocalGitAdapter implements GitAdapter {
   async git(cwd: string, args: string[]) {
@@ -24,7 +31,12 @@ export class LocalGitAdapter implements GitAdapter {
       throw new BridgeError('GIT_ERROR', e.stderr || e.message);
     }
   }
-  async verify(p: Project, clean = false) {
+  async verify(p: ProjectRepository, clean = false) {
+    if (!p.default_branch)
+      throw new BridgeError(
+        'REPOSITORY_REVIEW_REQUIRED',
+        'Configure the migrated repository default_branch explicitly before use.',
+      );
     if (!existsSync(p.repo_path)) throw new BridgeError('REPOSITORY_MISSING');
     const top = (await this.git(p.repo_path, ['rev-parse', '--show-toplevel'])).trim();
     if (realpathSync(top) !== realpathSync(p.repo_path)) throw new BridgeError('WRONG_REPOSITORY');
@@ -32,7 +44,11 @@ export class LocalGitAdapter implements GitAdapter {
     if (origin !== p.repo_url)
       throw new BridgeError('WRONG_REPOSITORY', 'origin differs from the registered URL');
     const branch = (await this.git(p.repo_path, ['branch', '--show-current'])).trim();
-    if (branch !== p.working_branch || /^(main|master|production|prod)$/i.test(branch))
+    if (
+      branch !== p.working_branch ||
+      branch === p.default_branch ||
+      /^(main|master|production|prod)$/i.test(branch)
+    )
       throw new BridgeError(
         'WRONG_BRANCH',
         `Expected ${p.working_branch}, found ${branch || 'detached HEAD'}`,
@@ -50,7 +66,12 @@ export class LocalGitAdapter implements GitAdapter {
         'Commit or stash existing work yourself before a new run.',
       );
   }
-  async setup(p: Project, clone: boolean) {
+  async setup(p: ProjectRepository, clone: boolean) {
+    if (!p.default_branch)
+      throw new BridgeError(
+        'REPOSITORY_REVIEW_REQUIRED',
+        'Configure default_branch before preparing the repository.',
+      );
     if (!existsSync(p.repo_path)) {
       if (!clone)
         throw new BridgeError('REPOSITORY_MISSING', 'Use bridge repo prepare <project> --clone');
@@ -77,24 +98,40 @@ export class LocalGitAdapter implements GitAdapter {
     );
     await this.verify(p, true);
   }
-  async prepare(p: Project) {
+  async prepare(p: ProjectRepository) {
     await this.verify(p, true);
     return (await this.git(p.repo_path, ['rev-parse', 'HEAD'])).trim();
   }
-  async evidence(p: Project, baseline: string): Promise<GitEvidence> {
+  async evidence(
+    p: ProjectRepository,
+    baseline: string,
+    archiveDirectory: string,
+  ): Promise<GitEvidence> {
     await this.verify(p);
     const commands = [
       ['rev-parse', 'HEAD'],
       ['status', '--porcelain=v1'],
       ['diff', '--no-ext-diff', '--no-textconv', '--name-status', baseline, '--'],
       ['diff', '--no-ext-diff', '--no-textconv', '--stat', baseline, '--'],
-      ['diff', '--no-ext-diff', '--no-textconv', '--binary', baseline, '--'],
+      ['diff', '--no-ext-diff', '--no-textconv', baseline, '--'],
       ['ls-files', '--others', '--exclude-standard', '-z'],
       ['diff', '--no-ext-diff', '--no-textconv', '--cached', '--stat'],
       ['log', '--format=%H %s', `${baseline}..HEAD`],
     ];
-    const values = await Promise.all(commands.map((a) => this.git(p.repo_path, a)));
+    const captures = await Promise.all(
+      commands.map((a) =>
+        captureGit(p.repo_path, a, archiveDirectory, EVIDENCE_LIMITS.gitOutputBytes),
+      ),
+    );
+    const issues = captures.flatMap((c) => (c.issue ? [c.issue] : []));
+    const values = captures.map(
+      (c) => c.text ?? 'OMITTED — see private snapshot and issues; not truncated',
+    );
+    const paths = captures[5].text?.split('\0').filter(Boolean) ?? [];
+    const untracked = await snapshotUntracked(p.repo_path, paths, archiveDirectory);
     return {
+      repository_id: p.repository_id,
+      logical_name: p.logical_name,
       head: values[0].trim(),
       baseline_head: baseline,
       branch: p.working_branch,
@@ -102,11 +139,13 @@ export class LocalGitAdapter implements GitAdapter {
       files_changed: values[2],
       diff_stat: values[3],
       diff: values[4],
-      untracked_files: values[5].split('\0').filter(Boolean),
+      untracked_files: paths,
       staged_stat: values[6],
       commits: values[7],
-      untracked_content:
-        'Not captured automatically; filenames and Codex file-change events retained.',
+      untracked_content: untracked.files,
+      issues: [...issues, ...untracked.issues],
+      raw_git_outputs: commands.map((command, i) => ({ command, ...captures[i], text: undefined })),
+      limits: EVIDENCE_LIMITS,
     };
   }
 }
