@@ -1,0 +1,13 @@
+{
+  "project_id": "daily-line",
+  "project_name": "The Daily Line",
+  "chatgpt_mode": "browser",
+  "chatgpt_thread_url": "https://chatgpt.com/c/REPLACE-WITH-EXACT-EXISTING-CONVERSATION-ID",
+  "chatgpt_thread_title": "REPLACE WITH EXACT VISIBLE CONVERSATION TITLE",
+  "repo_url": "https://github.com/YOUR-ORG/YOUR-DAILY-LINE-REPO.git",
+  "repo_path": "/home/grok/projects/daily-line",
+  "working_branch": "bridge/daily-line-agent-1",
+  "max_codex_turns_per_run": 5,
+  "timeout_ms": 900000,
+  "approval_policy": "human"
+}

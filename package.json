@@ -1,0 +1,40 @@
+{
+  "name": "grokbot-openai-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "files": [
+    "dist/src",
+    "skills",
+    "docs",
+    "config",
+    "SECURITY.md",
+    ".env.example"
+  ],
+  "description": "Browser-first ChatGPT architecture courier and durable Codex App Server coordinator",
+  "type": "module",
+  "bin": {
+    "bridge": "dist/src/cli/main.js"
+  },
+  "engines": {
+    "node": ">=24.11.0 <27"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "format": "prettier --write src tests scripts",
+    "format:check": "prettier --check src tests scripts",
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "bridge": "node dist/src/cli/main.js",
+    "smoke:codex": "npm run build && node dist/scripts/codex-smoke.js",
+    "smoke:codex-live": "npm run build && node dist/scripts/codex-live-smoke.js"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.4",
+    "prettier": "3.9.6",
+    "typescript": "7.0.2"
+  },
+  "dependencies": {
+    "@openai/codex": "0.154.0"
+  }
+}

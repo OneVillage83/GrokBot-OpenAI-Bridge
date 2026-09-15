@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.local/
+.bridge/
+*.sqlite*
+.env
+*.log
+coverage/
+daily-line.json
+*.local.json
+handoff/
+review-artifacts/
+*.tgz
